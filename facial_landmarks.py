@@ -6,7 +6,10 @@ Extracts facial landmarks (eyes, nose, mouth, jawline) for detailed face analysi
 import cv2
 import numpy as np
 from typing import List, Dict, Tuple, Optional
-import mediapipe as mp
+try:
+    import mediapipe as mp
+except ImportError:
+    mp = None
 
 
 class FacialLandmarksDetector:

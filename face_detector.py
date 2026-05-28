@@ -6,7 +6,10 @@ Robust ML-based face detection with recognition, landmarks, tracking, and emotio
 import cv2
 import numpy as np
 from typing import List, Dict, Tuple, Optional
-import mediapipe as mp
+try:
+    import mediapipe as mp
+except ImportError:
+    mp = None
 import os
 import json
 from datetime import datetime

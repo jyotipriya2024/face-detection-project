@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "lightface-net"
+version = "1.0.0"
+description = "LightFace-Net: Edge-Optimised Real-Time Face Detection with Asymmetric FPN"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+  { name = "Jyotipriya Panda", email = "jyotipriya@gift.edu.in" },
+]
+keywords = ["face-detection", "deep-learning", "edge-ai", "tensorrt", "pytorch"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+  "torch>=2.1.0",
+  "torchvision>=0.16.0",
+  "opencv-python>=4.8.0",
+  "fastapi>=0.104.0",
+  "uvicorn[standard]>=0.24.0",
+  "python-multipart>=0.0.6",
+  "streamlit>=1.28.0",
+  "pyyaml>=6.0",
+  "numpy>=1.24.0",
+  "matplotlib>=3.7.0",
+  "scipy>=1.11.0",
+  "pandas>=2.0.0",
+  "psutil>=5.9.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4.0", "pytest-cov>=4.1.0"]
+logging = ["tensorboard>=2.14.0", "wandb>=0.16.0"]
+edge = ["onnxruntime>=1.16.0"]
+
+[project.scripts]
+lightface-server  = "apps.inference_server.main:app"
+lightface-demo    = "apps.demo.app:main"
+lightface-bench   = "apps.benchmark_runner.run_benchmark:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts   = "-v --tb=short"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["features*", "shared*", "infrastructure*", "apps*"]
