@@ -36,19 +36,24 @@ def detect_on_webcam():
         print("  python detect_face.py photo.jpg")
         return
     print("Webcam running — press Q to quit")
-    while True:
-        ok, frame = cap.read()
-        if not ok:
-            break
-        faces = detect(frame)
-        draw(frame, faces)
-        cv2.putText(frame, f"Faces: {len(faces)}", (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-        cv2.imshow("Face Detection", frame)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-    cap.release()
-    cv2.destroyAllWindows()
+    try:
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                break
+            faces = detect(frame)
+            draw(frame, faces)
+            cv2.putText(frame, f"Faces: {len(faces)}", (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+            cv2.imshow("Face Detection", frame)
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+    except KeyboardInterrupt:
+        pass
+    finally:
+        cap.release()
+        cv2.destroyAllWindows()
+        print("Stopped.")
 
 
 def detect(img):
