@@ -59,6 +59,7 @@ DISPLAY_CONFIG = {
     'show_landmarks': True,
     'show_recognition': True,
     'show_tracking': True,
+    'show_emotions': True,
     'draw_contour': True,
     'font_size': 0.9,
     'line_width': 2,
@@ -88,4 +89,18 @@ ADVANCED_CONFIG = {
     'batch_size': 4,
     'augmentation': True,
     'use_padding': True,
+}
+
+# Emotion Detection Settings
+EMOTION_CONFIG = {
+    'input_size': 128,
+    'use_clahe': True,
+    'clahe_clip_limit': 2.0,
+    'clahe_grid_size': (8, 8),
+    'gamma': 1.1,
+    'smoothing_alpha': 0.6,
+    'history_max_idle': 30,
+    'feature_alpha': 0.5,
+    'delta_weight': 0.4,
+    'min_face_px': 40,
 }

@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from face_detector import FaceDetector
 from emotion_detector import EmotionDetector
+from config import EMOTION_CONFIG
 
 # ── Constants ────────────────────────────────────────────────────────────────
 EMOTIONS = ['angry', 'disgust', 'fear', 'happy', 'neutral', 'sad', 'surprised']
@@ -38,7 +39,7 @@ class FaceEngine:
 
     def __init__(self):
         self._detector = FaceDetector(confidence_threshold=0.45)
-        self._emotion  = EmotionDetector()
+        self._emotion  = EmotionDetector(EMOTION_CONFIG)
 
     # ── Embedding ─────────────────────────────────────────────────────────────
 
@@ -160,6 +161,8 @@ class FaceEngine:
                 continue
 
             # Emotion
+            if self._emotion and 'min_face_px' not in self._emotion.config:
+                self._emotion.config['min_face_px'] = 40
             emo_scores   = self._emotion.detect_emotion(crop)
             top_emotion  = max(emo_scores, key=emo_scores.get) if emo_scores else 'neutral'
             emoji        = EMOTION_EMOJI.get(top_emotion, '')

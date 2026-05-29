@@ -8,7 +8,7 @@ import sys, os
 sys.path.insert(0, os.path.dirname(__file__))
 
 from database import get_person_count, get_log_stats
-from theme import THEME_CSS, SIDEBAR_HTML
+from theme import get_theme_css, SIDEBAR_HTML
 
 st.set_page_config(
     page_title="AI Vision — Face Recognition System",
@@ -17,11 +17,12 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-st.markdown(THEME_CSS, unsafe_allow_html=True)
+theme_mode = st.sidebar.radio("Theme", ["Dark", "Light"], index=0, horizontal=True, key="theme_mode")
+st.markdown(get_theme_css(theme_mode), unsafe_allow_html=True)
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown(SIDEBAR_HTML, unsafe_allow_html=True)
+  st.markdown(SIDEBAR_HTML, unsafe_allow_html=True)
 
 # ── Hero ──────────────────────────────────────────────────────────────────────
 st.markdown("""
