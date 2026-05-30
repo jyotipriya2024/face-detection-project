@@ -56,6 +56,34 @@ def init_db():
                 timestamp   TEXT    DEFAULT (datetime('now'))
             );
 
+            CREATE TABLE IF NOT EXISTS attendance (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                person_db_id  INTEGER,
+                person_name   TEXT    NOT NULL,
+                employee_id   TEXT,
+                department    TEXT    DEFAULT '',
+                position      TEXT    DEFAULT '',
+                check_in      TEXT    DEFAULT (datetime('now')),
+                check_out     TEXT,
+                date          TEXT    DEFAULT (date('now')),
+                status        TEXT    DEFAULT 'present',
+                camera_id     TEXT    DEFAULT 'CAM-01',
+                confidence    REAL    DEFAULT 0.0
+            );
+
+            CREATE TABLE IF NOT EXISTS admin_credentials (
+                id         INTEGER PRIMARY KEY CHECK (id = 1),
+                username   TEXT    NOT NULL DEFAULT 'admin',
+                password   TEXT    NOT NULL DEFAULT 'Admin@123',
+                updated_at TEXT    DEFAULT ''
+            );
+
+            -- Seed default admin if not present
+            INSERT OR IGNORE INTO admin_credentials (id, username, password)
+            VALUES (1, 'admin', 'Admin@123');
+
+            CREATE INDEX IF NOT EXISTS idx_att_date         ON attendance(date);
+            CREATE INDEX IF NOT EXISTS idx_att_person       ON attendance(person_name);
             CREATE INDEX IF NOT EXISTS idx_logs_timestamp   ON detection_logs(timestamp);
             CREATE INDEX IF NOT EXISTS idx_logs_person_name ON detection_logs(person_name);
             CREATE INDEX IF NOT EXISTS idx_logs_emotion     ON detection_logs(emotion);
@@ -67,6 +95,11 @@ def init_db():
             ("quality_score", "REAL DEFAULT 0.0"),
             ("sample_count",  "INTEGER DEFAULT 1"),
             ("updated_at",    "TEXT DEFAULT (datetime('now'))"),
+            ("department",    "TEXT DEFAULT ''"),
+            ("position",      "TEXT DEFAULT ''"),
+            ("blood_group",   "TEXT DEFAULT ''"),
+            ("join_date",     "TEXT DEFAULT ''"),
+            ("photo_b64",     "TEXT DEFAULT ''"),
         ]:
             try:
                 conn.execute(f"ALTER TABLE persons ADD COLUMN {col} {defn}")
@@ -331,6 +364,134 @@ def clear_logs():
     conn = get_conn()
     try:
         conn.execute("DELETE FROM detection_logs")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# ── Attendance ────────────────────────────────────────────────────────────────
+
+def mark_attendance(person_db_id: int, person_name: str, employee_id: str,
+                    department: str, position: str, confidence: float,
+                    camera_id: str = 'CAM-01') -> dict:
+    """Mark attendance for today. Returns record dict with 'new' flag."""
+    conn = get_conn()
+    try:
+        today = __import__('datetime').date.today().isoformat()
+        existing = conn.execute(
+            "SELECT id, check_in FROM attendance WHERE person_name=? AND date=?",
+            (person_name, today)
+        ).fetchone()
+        if existing:
+            return {"new": False, "check_in": existing["check_in"], "id": existing["id"]}
+        cur = conn.execute(
+            "INSERT INTO attendance (person_db_id,person_name,employee_id,department,"
+            "position,date,confidence,camera_id) VALUES (?,?,?,?,?,?,?,?)",
+            (person_db_id, person_name, employee_id, department, position,
+             today, confidence, camera_id)
+        )
+        conn.commit()
+        return {"new": True, "check_in": __import__('datetime').datetime.now().strftime("%H:%M:%S"), "id": cur.lastrowid}
+    finally:
+        conn.close()
+
+
+def get_attendance_today() -> List[Dict]:
+    conn = get_conn()
+    try:
+        today = __import__('datetime').date.today().isoformat()
+        rows = conn.execute(
+            "SELECT a.*, p.age, p.gender, p.photo_b64 "
+            "FROM attendance a LEFT JOIN persons p ON a.person_db_id = p.id "
+            "WHERE a.date=? ORDER BY a.check_in DESC", (today,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def get_attendance_stats() -> dict:
+    conn = get_conn()
+    try:
+        today = __import__('datetime').date.today().isoformat()
+        total_emp = conn.execute("SELECT COUNT(*) FROM persons").fetchone()[0]
+        present = conn.execute(
+            "SELECT COUNT(DISTINCT person_name) FROM attendance WHERE date=?", (today,)
+        ).fetchone()[0]
+        dept_rows = conn.execute(
+            "SELECT p.department, COUNT(DISTINCT a.person_name) as present_count "
+            "FROM attendance a JOIN persons p ON a.person_db_id=p.id "
+            "WHERE a.date=? GROUP BY p.department", (today,)
+        ).fetchall()
+        weekly = conn.execute(
+            "SELECT date, COUNT(DISTINCT person_name) as count FROM attendance "
+            "WHERE date >= date('now','-6 days') GROUP BY date ORDER BY date"
+        ).fetchall()
+        return {
+            "total_employees": total_emp,
+            "present_today": present,
+            "absent_today": max(0, total_emp - present),
+            "attendance_rate": round(present / max(total_emp, 1) * 100, 1),
+            "by_department": [dict(r) for r in dept_rows],
+            "weekly_trend": [dict(r) for r in weekly],
+        }
+    finally:
+        conn.close()
+
+
+def get_employee_attendance_history(person_name: str, limit: int = 30) -> List[Dict]:
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM attendance WHERE person_name=? ORDER BY date DESC LIMIT ?",
+            (person_name, limit)
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def get_person_full(person_db_id: int) -> Optional[Dict]:
+    conn = get_conn()
+    try:
+        row = conn.execute("SELECT * FROM persons WHERE id=?", (person_db_id,)).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def get_person_by_name(name: str) -> Optional[Dict]:
+    conn = get_conn()
+    try:
+        row = conn.execute("SELECT * FROM persons WHERE name=? LIMIT 1", (name,)).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+# ── Admin Credentials ────────────────────────────────────────────────────────
+
+def get_admin_credentials() -> Dict:
+    """Return the single admin credentials row."""
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            "SELECT username, password, updated_at FROM admin_credentials WHERE id=1"
+        ).fetchone()
+        return dict(row) if row else {"username": "admin", "password": "Admin@123", "updated_at": ""}
+    finally:
+        conn.close()
+
+
+def update_admin_credentials(username: str, password: str) -> None:
+    """Update admin username and password, stamping updated_at."""
+    import datetime as _dt
+    conn = get_conn()
+    try:
+        conn.execute(
+            "UPDATE admin_credentials SET username=?, password=?, updated_at=? WHERE id=1",
+            (username, password, _dt.datetime.utcnow().isoformat())
+        )
         conn.commit()
     finally:
         conn.close()

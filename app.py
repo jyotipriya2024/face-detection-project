@@ -22,7 +22,11 @@ st.set_page_config(
     }
 )
 
-theme_mode = st.sidebar.radio("Theme", ["Dark", "Light"], index=0, horizontal=True, key="theme_mode")
+with st.sidebar:
+    st.markdown(SIDEBAR_HTML, unsafe_allow_html=True)
+    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+    theme_mode = st.radio("Theme", ["Dark", "Light"], index=0, horizontal=True, key="theme_mode",
+                          label_visibility="collapsed")
 st.markdown(get_theme_css(theme_mode), unsafe_allow_html=True)
 
 # ── Style page-link elements to match the dark theme ──────────────────────────
@@ -78,9 +82,6 @@ st.markdown("""
 [data-testid="stPageLink"] svg { display:none !important; }
 </style>
 """, unsafe_allow_html=True)
-
-with st.sidebar:
-  st.markdown(SIDEBAR_HTML, unsafe_allow_html=True)
 
 # ── Hero ──────────────────────────────────────────────────────────────────────
 st.markdown("""

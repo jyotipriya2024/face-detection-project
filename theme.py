@@ -55,25 +55,126 @@ html, body,
 }
 [data-testid="stMainBlockContainer"] { position: relative; z-index: 1; }
 
-/* ── Sidebar ────────────────────────────────────────────────────────────────── */
+/* ── Sidebar Shell ──────────────────────────────────────────────────────────── */
 [data-testid="stSidebar"] {
-    background: rgba(3,8,18,0.97) !important;
-    border-right: 1px solid rgba(0,200,255,0.12) !important;
-    -webkit-backdrop-filter: blur(24px);
-    backdrop-filter: blur(24px);
+    background: #0b1220 !important;
+    border-right: 1px solid rgba(255,255,255,0.07) !important;
+    min-width: 220px !important;
+    max-width: 240px !important;
 }
-[data-testid="stSidebar"] * { color: #c8dff0 !important; }
-[data-testid="stSidebarContent"] { padding-top: 1.5rem; }
+[data-testid="stSidebarContent"] { padding: 0 !important; }
+[data-testid="stSidebarContent"] * { color: #8ab0cc !important; }
 
-/* ── Hide Streamlit chrome ──────────────────────────────────────────────────── */
-#MainMenu, footer,
+/* ── Hide Streamlit chrome (specific selectors only — never generic 'header') ── */
+#MainMenu,
+footer,
 [data-testid="stToolbar"],
-[data-testid="stHeader"],
 [data-testid="stDecoration"],
-[data-testid="stStatusWidget"],
-header { visibility: hidden !important; height: 0 !important; min-height: 0 !important; }
-[data-testid="stApp"]              { padding-top: 0 !important; }
+[data-testid="stStatusWidget"] {
+    visibility: hidden !important;
+    height: 0 !important;
+    min-height: 0 !important;
+}
+[data-testid="stHeader"] {
+    background: transparent !important;
+    height: 0 !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+}
+[data-testid="stApp"]                { padding-top: 0 !important; }
 [data-testid="stMainBlockContainer"] { padding-top: 1rem !important; }
+
+/* ── Sidebar Navigation ─────────────────────────────────────────────────────── */
+[data-testid="stSidebarNav"] {
+    padding: 0 !important;
+    margin-top: 0 !important;
+}
+/* "MAIN" section label */
+[data-testid="stSidebarNav"]::before {
+    content: 'MAIN';
+    display: block;
+    font-size: 0.60rem;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    color: #2a4255 !important;
+    text-transform: uppercase;
+    padding: 14px 16px 6px;
+    font-family: 'Inter', sans-serif;
+}
+[data-testid="stSidebarNavItems"] {
+    padding: 0 8px 4px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 1px !important;
+}
+[data-testid="stSidebarNavLink"] {
+    display: flex !important;
+    align-items: center !important;
+    gap: 9px !important;
+    padding: 9px 10px 9px 12px !important;
+    margin: 0 !important;
+    border-radius: 8px !important;
+    border-left: 3px solid transparent !important;
+    color: #6a8fa8 !important;
+    font-size: 0.84rem !important;
+    font-weight: 500 !important;
+    letter-spacing: 0.01em !important;
+    text-decoration: none !important;
+    transition: background 0.15s, color 0.15s, border-color 0.15s !important;
+    background: transparent !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+}
+[data-testid="stSidebarNavLink"]:hover {
+    background: rgba(255,255,255,0.055) !important;
+    color: #c0daf0 !important;
+    border-left-color: rgba(0,200,255,0.35) !important;
+}
+[data-testid="stSidebarNavLink"][aria-current="page"] {
+    background: rgba(0,200,255,0.10) !important;
+    color: #40d4ff !important;
+    font-weight: 600 !important;
+    border-left-color: #00c8ff !important;
+}
+[data-testid="stSidebarNavLink"] span,
+[data-testid="stSidebarNavLink"] p {
+    color: inherit !important;
+    font-size: inherit !important;
+    font-weight: inherit !important;
+}
+[data-testid="stSidebarNavSeparator"] {
+    border-color: rgba(255,255,255,0.06) !important;
+    margin: 6px 10px !important;
+}
+
+/* ── Sidebar collapse / expand buttons ──────────────────────────────────────── */
+[data-testid="collapsedControl"],
+[data-testid="collapsedControl"] * {
+    visibility: visible !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+}
+[data-testid="collapsedControl"] {
+    display: flex !important;
+    z-index: 9999 !important;
+    background: rgba(11,18,32,0.90) !important;
+    border: 1px solid rgba(0,200,255,0.28) !important;
+    border-radius: 0 8px 8px 0 !important;
+}
+[data-testid="collapsedControl"] svg { color: #00c8ff !important; fill: #00c8ff !important; }
+[data-testid="collapsedControl"]:hover {
+    background: rgba(0,200,255,0.12) !important;
+    border-color: #00c8ff !important;
+}
+[data-testid="stSidebarCollapseButton"],
+[data-testid="stSidebarCollapseButton"] * {
+    visibility: visible !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+}
+[data-testid="stSidebarCollapseButton"] button { background: transparent !important; }
+[data-testid="stSidebarCollapseButton"] svg    { color: #3a6a8a !important; fill: #3a6a8a !important; }
 
 /* ── Tabs ───────────────────────────────────────────────────────────────────── */
 [data-testid="stTabs"] button {
@@ -611,26 +712,240 @@ hr { border-color: rgba(0,200,255,0.12) !important; }
 </style>
 """
 
+LIGHT_CSS = """
+<style>
+:root {
+  --c-bg:       #f0f4f8;
+  --c-surface:  rgba(255,255,255,0.90);
+  --c-border:   rgba(0,120,200,0.18);
+  --c-cyan:     #0080c8;
+  --c-purple:   #5a3fd0;
+  --c-green:    #00a854;
+  --c-red:      #d63050;
+  --c-amber:    #d4840a;
+  --c-text:     #0a1a2e;
+  --c-muted:    #4a6a8a;
+  --c-dim:      #7a9ab0;
+  --radius-sm:  8px;
+  --radius-md:  14px;
+  --radius-lg:  20px;
+  --blur-sm:    blur(8px);
+  --blur-md:    blur(16px);
+  --transition: all 0.25s ease;
+}
+html, body, [data-testid="stAppViewContainer"] {
+    background: var(--c-bg) !important;
+    color: var(--c-text) !important;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+}
+[data-testid="stSidebar"] {
+    background: rgba(230,238,248,0.98) !important;
+    border-right: 1px solid rgba(0,120,200,0.15) !important;
+}
+[data-testid="stSidebar"] * { color: #1a3a5a !important; }
+#MainMenu,
+footer,
+[data-testid="stToolbar"],
+[data-testid="stDecoration"],
+[data-testid="stStatusWidget"] {
+    visibility: hidden !important;
+    height: 0 !important;
+    min-height: 0 !important;
+}
+[data-testid="stHeader"] {
+    background: transparent !important;
+    height: 0 !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+}
+[data-testid="stApp"] { padding-top: 0 !important; }
+[data-testid="stMainBlockContainer"] { padding-top: 1rem !important; }
+[data-testid="collapsedControl"],
+[data-testid="collapsedControl"] * { visibility: visible !important; opacity: 1 !important; pointer-events: auto !important; }
+[data-testid="collapsedControl"] {
+    display: flex !important; z-index: 9999 !important;
+    background: rgba(220,235,250,0.95) !important;
+    border: 1px solid rgba(0,120,200,0.35) !important;
+    border-radius: 0 10px 10px 0 !important;
+}
+[data-testid="collapsedControl"] svg { color: #0080c8 !important; fill: #0080c8 !important; }
+[data-testid="stSidebarCollapseButton"],
+[data-testid="stSidebarCollapseButton"] * { visibility: visible !important; opacity: 1 !important; pointer-events: auto !important; }
+[data-testid="stSidebarCollapseButton"] svg { color: #0080c8 !important; fill: #0080c8 !important; }
+[data-testid="stSidebarNavLink"] {
+    display: flex !important;
+    align-items: center !important;
+    gap: 10px !important;
+    padding: 10px 14px !important;
+    margin: 3px 0 !important;
+    border-radius: 10px !important;
+    border: 1px solid transparent !important;
+    color: #1a3a6a !important;
+    font-size: 0.86rem !important;
+    font-weight: 600 !important;
+    text-decoration: none !important;
+    transition: all 0.2s ease !important;
+    background: rgba(0,120,200,0.05) !important;
+}
+[data-testid="stSidebarNavLink"]:hover {
+    background: rgba(0,120,200,0.12) !important;
+    border-color: rgba(0,120,200,0.40) !important;
+    color: #0060a8 !important;
+    transform: translateX(3px) !important;
+}
+[data-testid="stSidebarNavLink"][aria-current="page"] {
+    background: linear-gradient(135deg, rgba(0,120,200,0.18), rgba(90,63,208,0.18)) !important;
+    border-color: rgba(0,120,200,0.55) !important;
+    color: #0060a8 !important;
+}
+.stButton > button {
+    background: linear-gradient(135deg, #0080c822, #5a3fd022) !important;
+    border: 1px solid rgba(0,120,200,0.35) !important;
+    color: var(--c-cyan) !important;
+    font-weight: 600 !important;
+    border-radius: var(--radius-sm) !important;
+    transition: var(--transition) !important;
+}
+.page-header {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.85rem; font-weight: 700;
+    background: linear-gradient(135deg, var(--c-cyan), #7b61ff);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+.glass-card {
+    background: rgba(255,255,255,0.80);
+    border: 1px solid rgba(0,120,200,0.15);
+    border-radius: var(--radius-md);
+    padding: 22px 26px;
+    backdrop-filter: var(--blur-sm);
+}
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: rgba(0,0,0,0.05); }
+::-webkit-scrollbar-thumb { background: rgba(0,120,200,0.30); border-radius: 4px; }
+</style>
+"""
+
+
+def get_theme_css(mode: str = "Dark") -> str:
+    return THEME_CSS if mode == "Dark" else LIGHT_CSS
+
+
 SIDEBAR_HTML = """
-<div class="sidebar-logo">AI VISION</div>
-<div style="font-size:.60rem;letter-spacing:.13em;color:#2a5570;margin-top:2px;text-transform:uppercase">
-  Face Recognition System
+<style>
+/* ── Sidebar header logo area ───────────────────────────────────────────────── */
+.sb-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 16px 14px 14px;
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+    margin-bottom: 4px;
+}
+.sb-logo-icon {
+    width: 32px; height: 32px; border-radius: 8px;
+    background: linear-gradient(135deg, #00c8ff, #7b61ff);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1rem; flex-shrink: 0;
+}
+.sb-logo-text { line-height: 1.2; }
+.sb-logo-title {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.80rem; font-weight: 900;
+    color: #e0eeff !important;
+    letter-spacing: 0.08em;
+}
+.sb-logo-sub {
+    font-size: 0.58rem; color: #2e4a60 !important;
+    letter-spacing: 0.10em; text-transform: uppercase; margin-top: 1px;
+}
+
+/* ── Info section ───────────────────────────────────────────────────────────── */
+.sb-section-label {
+    font-size: 0.58rem; font-weight: 700;
+    letter-spacing: 0.16em; text-transform: uppercase;
+    color: #2a4255 !important; padding: 14px 16px 6px;
+}
+.sb-info-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 6px 14px; font-size: 0.78rem;
+}
+.sb-info-key  { color: #3a5570 !important; font-size: 0.72rem; }
+.sb-info-val  { color: #8ab0cc !important; font-weight: 500; font-size: 0.78rem; }
+.sb-divider   { border: none; border-top: 1px solid rgba(255,255,255,0.07); margin: 8px 10px; }
+
+/* ── Status row at bottom ───────────────────────────────────────────────────── */
+.sb-status {
+    padding: 10px 14px 14px;
+    border-top: 1px solid rgba(255,255,255,0.07);
+    margin-top: 8px;
+}
+.sb-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: rgba(0,230,118,0.10);
+    border: 1px solid rgba(0,230,118,0.25);
+    border-radius: 20px; padding: 3px 10px;
+    font-size: 0.68rem; font-weight: 700;
+    letter-spacing: 0.08em; color: #00e676 !important;
+    text-transform: uppercase;
+}
+.sb-badge-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: #00e676; flex-shrink: 0;
+    animation: blink 1.4s ease-in-out infinite;
+}
+.sb-engine-badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    background: rgba(0,200,255,0.08);
+    border: 1px solid rgba(0,200,255,0.20);
+    border-radius: 20px; padding: 3px 9px;
+    font-size: 0.65rem; font-weight: 600;
+    letter-spacing: 0.04em; color: #4a9ab8 !important;
+    margin-top: 6px; white-space: nowrap;
+}
+</style>
+
+<div class="sb-header">
+  <div class="sb-logo-icon">🤖</div>
+  <div class="sb-logo-text">
+    <div class="sb-logo-title">AI VISION</div>
+    <div class="sb-logo-sub">Face Recognition</div>
+  </div>
 </div>
-<div class="sidebar-divider"></div>
-<div class="sidebar-label">Researcher</div>
-<div class="sidebar-value">Jyotipriya Panda</div>
-<div class="sidebar-value" style="color:#3a6070!important">Reg. 2407432009</div>
-<div style="margin-top:8px" class="sidebar-label">Programme</div>
-<div class="sidebar-value">M.Tech CSE 2024&ndash;2026</div>
-<div class="sidebar-value" style="color:#3a6070!important">GIFT Bhubaneswar &middot; BPUT</div>
-<div style="margin-top:8px" class="sidebar-label">Supervisor</div>
-<div class="sidebar-value">Asst. Prof. Mohapatra</div>
-<div class="sidebar-value">Girashree Shau</div>
-<div class="sidebar-divider"></div>
-<div class="live-badge" style="margin-top:2px">
-  <div class="live-dot"></div>&nbsp;System Online
+
+<div class="sb-section-label">RESEARCHER</div>
+<div class="sb-info-row">
+  <span class="sb-info-key">Name</span>
+  <span class="sb-info-val">Jyotipriya Panda</span>
 </div>
-<div style="margin-top:8px">
-  <span class="ai-badge">&#9889; LightFace-Net v2.0</span>
+<div class="sb-info-row">
+  <span class="sb-info-key">Reg.</span>
+  <span class="sb-info-val">2407432009</span>
+</div>
+<div class="sb-info-row">
+  <span class="sb-info-key">Programme</span>
+  <span class="sb-info-val">M.Tech CSE</span>
+</div>
+<div class="sb-info-row">
+  <span class="sb-info-key">Batch</span>
+  <span class="sb-info-val">2024&ndash;2026</span>
+</div>
+<div class="sb-info-row">
+  <span class="sb-info-key">Institute</span>
+  <span class="sb-info-val">GIFT Bhubaneswar</span>
+</div>
+
+<hr class="sb-divider">
+
+<div class="sb-section-label">SUPERVISOR</div>
+<div class="sb-info-row">
+  <span class="sb-info-val" style="font-size:0.76rem!important">Asst. Prof. Mohapatra<br>
+  <span style="color:#2e4a60!important;font-size:0.70rem">Girashree Shau</span></span>
+</div>
+
+<div class="sb-status">
+  <div><span class="sb-badge"><span class="sb-badge-dot"></span>System Online</span></div>
+  <div><span class="sb-engine-badge">⚡ LightFace-Net v2.0</span></div>
 </div>
 """
