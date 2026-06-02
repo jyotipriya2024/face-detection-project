@@ -14,10 +14,13 @@ from face_detector import FaceDetector
 from facial_landmarks import FacialLandmarksDetector
 from face_recognizer import FaceRecognizer
 from face_tracker import FaceTracker
+from emotion_detector import EmotionDetector
+from utils import crop_face
 from config import (
     FACE_DETECTION_CONFIG, LANDMARKS_CONFIG,
     RECOGNITION_CONFIG, TRACKING_CONFIG, VIDEO_CONFIG,
-    DISPLAY_CONFIG, OUTPUT_CONFIG, LOGGING_CONFIG, ADVANCED_CONFIG
+    DISPLAY_CONFIG, OUTPUT_CONFIG, LOGGING_CONFIG, ADVANCED_CONFIG,
+    EMOTION_CONFIG
 )
 
 
@@ -28,7 +31,7 @@ class FaceDetectionSystem:
     """
     
     def __init__(self, enable_tracking: bool = True, enable_recognition: bool = True,
-                 enable_landmarks: bool = True):
+                 enable_landmarks: bool = True, enable_emotions: bool = True):
         """
         Initialize face detection system.
         
@@ -46,6 +49,7 @@ class FaceDetectionSystem:
         self.landmarks_detector = FacialLandmarksDetector() if enable_landmarks else None
         self.face_recognizer = FaceRecognizer() if enable_recognition else None
         self.face_tracker = FaceTracker() if enable_tracking else None
+        self.emotion_detector = EmotionDetector(EMOTION_CONFIG) if enable_emotions else None
         
         # Statistics
         self.stats = {
@@ -82,6 +86,7 @@ class FaceDetectionSystem:
             'frame': frame,
             'detections': [],
             'landmarks': [],
+            'emotions': [],
             'recognitions': [],
             'tracking': {}
         }
@@ -93,6 +98,7 @@ class FaceDetectionSystem:
         
         # Extract face regions and process
         centroids = []
+        detection_centroids = []
         for idx, detection in enumerate(detections):
             x_min, y_min, x_max, y_max = detection['bbox']
             face_image = frame[y_min:y_max, x_min:x_max]
@@ -106,9 +112,16 @@ class FaceDetectionSystem:
                     # Get centroid from landmarks for tracking
                     center = self.landmarks_detector.get_face_center(landmarks[0]['landmarks'])
                     centroids.append(center)
+                    detection_centroids.append(center)
                 else:
                     # Fallback to bbox center
-                    centroids.append(((x_min + x_max) // 2, (y_min + y_max) // 2))
+                    fallback_center = ((x_min + x_max) // 2, (y_min + y_max) // 2)
+                    centroids.append(fallback_center)
+                    detection_centroids.append(fallback_center)
+            else:
+                fallback_center = ((x_min + x_max) // 2, (y_min + y_max) // 2)
+                centroids.append(fallback_center)
+                detection_centroids.append(fallback_center)
             
             # Recognize face
             if self.face_recognizer and face_image.size > 0:
@@ -124,6 +137,22 @@ class FaceDetectionSystem:
         if self.face_tracker and centroids:
             self.face_tracker.update(centroids)
             results['tracking'] = self.face_tracker.objects
+        track_ids = self._match_tracks_to_detections(detection_centroids, results['tracking'])
+
+        if self.emotion_detector:
+            active_ids = set([tid for tid in track_ids if tid is not None])
+            self.emotion_detector.prune_history(active_ids)
+
+        for idx, detection in enumerate(detections):
+            if not self.emotion_detector:
+                break
+            x_min, y_min, x_max, y_max = detection['bbox']
+            face_crop = crop_face(frame, (x_min, y_min, x_max, y_max), padding=0.15)
+            if face_crop.size == 0:
+                continue
+            face_id = track_ids[idx] if idx < len(track_ids) else None
+            emotion_dict = self.emotion_detector.detect_emotion(face_crop, face_id=face_id)
+            results['emotions'].append(emotion_dict)
         
         return results
     
@@ -163,10 +192,31 @@ class FaceDetectionSystem:
                 
                 cv2.putText(annotated, label, (x_min, y_min - 10),
                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
+
+        # Draw emotion visualization
+        if DISPLAY_CONFIG['show_emotions'] and results['emotions'] and self.emotion_detector:
+            for detection, emotion in zip(results['detections'], results['emotions']):
+                annotated = self.emotion_detector.draw_emotion(annotated, detection['bbox'], emotion)
         
         # Draw tracking (tracking is handled internally but not displayed as IDs)
         
         return annotated
+
+    def _match_tracks_to_detections(self, detection_centroids: List[Tuple[int, int]],
+                                    tracked_objects: Dict[int, Tuple[int, int]]) -> List[Optional[int]]:
+        if not detection_centroids or not tracked_objects:
+            return [None for _ in detection_centroids]
+        track_ids = []
+        for center in detection_centroids:
+            best_id = None
+            best_dist = float('inf')
+            for object_id, obj_center in tracked_objects.items():
+                dist = (center[0] - obj_center[0]) ** 2 + (center[1] - obj_center[1]) ** 2
+                if dist < best_dist:
+                    best_dist = dist
+                    best_id = object_id
+            track_ids.append(best_id)
+        return track_ids
     
     def run_webcam(self, camera_id: int = 0, display: bool = True):
         """

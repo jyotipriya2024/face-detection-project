@@ -6,7 +6,10 @@ Robust ML-based face detection with recognition, landmarks, tracking, and emotio
 import cv2
 import numpy as np
 from typing import List, Dict, Tuple, Optional
-import mediapipe as mp
+try:
+    import mediapipe as mp
+except ImportError:
+    mp = None
 import os
 import json
 from datetime import datetime
@@ -45,49 +48,49 @@ class FaceDetector:
         except Exception as e:
             print(f"MediaPipe solutions not available, using OpenCV: {e}")
     
+    # Minimum face dimension in pixels — smaller crops are ignored
+    MIN_FACE_PX = 60
+
     def detect_faces(self, image: np.ndarray) -> List[Dict]:
         """
-        Detect all faces in image.
-        
-        Args:
-            image: Input image (BGR format from OpenCV)
-            
-        Returns:
-            List of detected faces with bounding boxes and confidence
+        Detect all faces in image (BGR).
+        Returns list of {bbox, confidence, landmarks}.
         """
-        # Use cascade if MediaPipe not available
         if self.face_detector is None:
             return self._detect_faces_cascade(image)
-        
+
         try:
             rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            results = self.face_detector.process(rgb_image)
-            
+            results   = self.face_detector.process(rgb_image)
+
             detections = []
             if results.detections:
-                h, w, _ = image.shape
-                for detection in results.detections:
-                    bbox = detection.location_data.relative_bounding_box
-                    
-                    # Convert to pixel coordinates
-                    x_min = int(bbox.xmin * w)
-                    y_min = int(bbox.ymin * h)
-                    width = int(bbox.width * w)
-                    height = int(bbox.height * h)
-                    
-                    # Ensure coordinates are within bounds
-                    x_min = max(0, x_min)
-                    y_min = max(0, y_min)
-                    x_max = min(w, x_min + width)
-                    y_max = min(h, y_min + height)
-                    
+                h, w = image.shape[:2]
+                for det in results.detections:
+                    score = det.score[0] if det.score else 0.0
+                    if score < self.confidence_threshold:
+                        continue
+
+                    bbox   = det.location_data.relative_bounding_box
+                    x_min  = max(0, int(bbox.xmin * w))
+                    y_min  = max(0, int(bbox.ymin * h))
+                    x_max  = min(w, int((bbox.xmin + bbox.width)  * w))
+                    y_max  = min(h, int((bbox.ymin + bbox.height) * h))
+
+                    # Skip implausibly small detections (background artifacts)
+                    if (x_max - x_min) < self.MIN_FACE_PX or (y_max - y_min) < self.MIN_FACE_PX:
+                        continue
+
                     detections.append({
-                        'bbox': (x_min, y_min, x_max, y_max),
-                        'confidence': detection.score[0] if detection.score else 0.0,
-                        'landmarks': detection.location_data.relative_keypoints
+                        'bbox':       (x_min, y_min, x_max, y_max),
+                        'confidence': score,
+                        'landmarks':  det.location_data.relative_keypoints
                     })
-            
+
+            # Apply NMS to remove overlapping detections
+            detections = self._remove_overlapping_detections(detections)
             return detections
+
         except Exception:
             return self._detect_faces_cascade(image)
     
@@ -170,8 +173,10 @@ class FaceDetector:
                 
                 if inter_x_max > inter_x_min and inter_y_max > inter_y_min:
                     intersection = (inter_x_max - inter_x_min) * (inter_y_max - inter_y_min)
-                    # If >30% overlap, mark as duplicate
-                    if intersection > 0.3 * area1:
+                    area2 = (x2_max - x2_min) * (y2_max - y2_min)
+                    iou   = intersection / (area1 + area2 - intersection + 1)
+                    # IoU > 0.45 → same face, keep the larger one
+                    if iou > 0.45:
                         used.add(j)
         
         return filtered
