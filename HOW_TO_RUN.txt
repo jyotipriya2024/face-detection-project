@@ -1,0 +1,25 @@
+HOW TO RUN FACE DETECTION
+==========================
+
+STEP 1 - Open terminal in VS Code
+   Press Ctrl + ` (backtick key)
+
+STEP 2 - Run these two commands:
+
+   cd "d:\Users\dibya\jyoti\face-detection-project"
+
+   & "C:\Program Files\Python311\python.exe" detect_face.py
+
+   A window will open showing your webcam with green boxes on detected faces.
+
+STEP 3 - To stop
+   Press Q in the camera window, or close it.
+
+
+------------------------------------------------------------
+TO TEST ON A PHOTO (instead of webcam):
+
+   & "C:\Program Files\Python311\python.exe" detect_face.py "C:\path\to\photo.jpg"
+
+   Replace C:\path\to\photo.jpg with the actual path to your image.
+------------------------------------------------------------

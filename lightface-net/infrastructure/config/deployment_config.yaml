@@ -1,0 +1,40 @@
+# infrastructure/config/deployment_config.yaml
+# Edge Hardware Deployment Configuration
+
+deployment:
+  primary_target: "jetson_nano"
+  fallback_target: "raspberry_pi_4b"
+
+jetson_nano:
+  jetpack_version: "4.6"
+  tensorrt_version: "8.6"
+  precision: "INT8"
+  workspace_gb: 4
+  fp16_fallback: true
+  onnx_opset: 17
+  engine_path: "models/quantized/lightfacenet_int8.trt"
+  target_fps: 30
+  target_size_mb: 10.0
+  input_size: [640, 480]
+  power_mode: "MAXN"        # tegra-jetsontool nvpmodel -m 0
+
+raspberry_pi_4b:
+  os: "raspbian_64bit"
+  precision: "FP32"         # Pi lacks INT8 DSP acceleration
+  runtime: "onnxruntime"
+  target_fps: 8
+  input_size: [320, 240]    # Reduced resolution for Pi
+  num_threads: 4
+
+inference_server:
+  host: "0.0.0.0"
+  port: 8000
+  workers: 1
+  timeout_seconds: 30
+  max_image_size_kb: 2048
+
+demo:
+  streamlit_port: 8501
+  webcam_device_id: 0
+  display_fps: true
+  display_heatmap: false     # Set true for A-FPN visualization demo

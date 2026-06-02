@@ -1,0 +1,12 @@
+# Edge deployment requirements (Jetson Nano / Raspberry Pi)
+# Install AFTER base requirements.txt
+
+# --- Jetson Nano (JetPack 4.6, Python 3.8) ---
+# TensorRT wheels are pre-installed via JetPack — do NOT pip install tensorrt directly.
+# Install PyCUDA from JetPack wheels:
+#   sudo apt install python3-pycuda
+pycuda>=2022.1
+jetson-stats>=4.2.0          # jtop monitoring tool
+
+# --- Raspberry Pi 4B ---
+onnxruntime>=1.16.0          # CPU-only ARM build
