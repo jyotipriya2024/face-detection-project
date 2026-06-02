@@ -48,6 +48,8 @@ batch_input/
 batch_output/
 face_database/
 *.db
+# …but ship the main application database (enrolled employees, logs, login) with the code
+!face_recognition.db
 *.json
 *.csv
 

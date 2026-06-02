@@ -11,20 +11,30 @@ echo  Complete Startup Script
 echo ====================================================
 echo.
 
-REM Get the directory where this script is located
+REM Get the directory where this script is located (project root)
 set SCRIPT_DIR=%~dp0
 cd /d "%SCRIPT_DIR%"
 
 REM Check if we're in the right directory
-if not exist "face_detection_system" (
-    echo Error: face_detection_system directory not found
+if not exist "backend" (
+    echo Error: backend directory not found
+    echo Please run this script from the project root directory
+    pause
+    exit /b 1
+)
+if not exist "web" (
+    echo Error: web directory not found
     echo Please run this script from the project root directory
     pause
     exit /b 1
 )
 
+REM Prefer the project virtual environment if present
+set PYTHON=python
+if exist "%SCRIPT_DIR%.venv\Scripts\python.exe" set PYTHON=%SCRIPT_DIR%.venv\Scripts\python.exe
+
 REM Check Python
-python --version >nul 2>&1
+"%PYTHON%" --version >nul 2>&1
 if errorlevel 1 (
     echo Error: Python is not installed or not in PATH
     pause
@@ -32,22 +42,22 @@ if errorlevel 1 (
 )
 
 echo [1/3] Checking dependencies...
-python -m pip list | findstr fastapi >nul
+"%PYTHON%" -m pip show fastapi >nul 2>&1
 if errorlevel 1 (
     echo Installing dependencies...
-    pip install -q -r face_detection_system/requirements.txt
+    "%PYTHON%" -m pip install -q fastapi uvicorn -r requirements.txt
 )
 
 echo [2/3] Starting Backend API...
 echo.
-start "Face Recognition Backend" cmd /k "cd /d "%SCRIPT_DIR%face_detection_system\backend" && python api_server.py"
+start "Face Recognition Backend" cmd /k "cd /d "%SCRIPT_DIR%backend" && "%PYTHON%" api_server.py"
 
 REM Wait for API to start
 timeout /t 3 /nobreak
 
 echo [3/3] Starting Frontend Web Server...
 echo.
-start "Face Recognition Frontend" cmd /k "cd /d "%SCRIPT_DIR%face_detection_system\web" && npm run dev"
+start "Face Recognition Frontend" cmd /k "cd /d "%SCRIPT_DIR%web" && npm run dev"
 
 REM Wait for frontend to start
 timeout /t 3 /nobreak

@@ -37,25 +37,45 @@ app.add_middleware(
 
 # ── ML Model Initialisation ───────────────────────────────────────────────────
 
-# 1. MediaPipe Face Detection — Tasks API (mediapipe >= 0.10)
-HAS_MEDIAPIPE = False
-_mp_create    = None
-try:
-    from mediapipe.tasks import python as _mp_python
-    from mediapipe.tasks.python import vision as _mp_vision
-    # Tasks API uses model files — check if bundled asset is available
-    import mediapipe.tasks.python.vision.face_detector as _mp_fd_mod
-    _mp_create = _mp_vision.FaceDetector
-    HAS_MEDIAPIPE = True
-    log.info("✓ MediaPipe Tasks FaceDetector available")
-except Exception as e:
-    log.warning("MediaPipe Tasks API unavailable (%s)", e)
+# Deep face stack — YuNet (detection + 5 landmarks) and SFace (128-D identity
+# embedding), both from the OpenCV Zoo. SFace embeddings are identity-
+# discriminative, unlike handcrafted texture/colour features, so different
+# people no longer collide at a usable threshold.
+MODELS_DIR = ROOT / "models"
+YUNET_PATH = MODELS_DIR / "face_detection_yunet_2023mar.onnx"
+SFACE_PATH = MODELS_DIR / "face_recognition_sface_2021dec.onnx"
 
-# 2. OpenCV Haar Cascade (always available — primary fallback)
+EMB_DIM = 128  # SFace embedding dimensionality
+
+_yunet  = None
+_sface  = None
+HAS_DNN = False
+try:
+    if YUNET_PATH.exists() and SFACE_PATH.exists():
+        _yunet = cv2.FaceDetectorYN.create(
+            str(YUNET_PATH), "", (320, 320),
+            score_threshold=0.6, nms_threshold=0.3, top_k=5000,
+        )
+        _sface = cv2.FaceRecognizerSF.create(str(SFACE_PATH), "")
+        HAS_DNN = True
+        log.info("✓ DNN face stack loaded: YuNet + SFace (128-D embeddings)")
+    else:
+        log.warning("DNN model files missing in %s — using Haar fallback (low accuracy)", MODELS_DIR)
+except Exception as e:
+    log.warning("Failed to init DNN face stack (%s) — using Haar fallback", e)
+
+# OpenCV Haar Cascade — safety-net fallback only (used if DNN models unavailable)
 _haar         = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
 _haar_profile = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_profileface.xml")
 
-log.info("Detection pipeline: MediaPipe=%s  Haar=OK", HAS_MEDIAPIPE)
+log.info("Detection pipeline: DNN(YuNet+SFace)=%s  HaarFallback=OK", HAS_DNN)
+
+# ── Matching policy — strict by design, to avoid false identifications ─────────
+MATCH_THRESHOLD = 0.40   # min cosine similarity to accept (SFace default is 0.363)
+MATCH_MARGIN    = 0.10   # winning identity must beat the runner-up by this much
+MIN_FACE_PX     = 40     # ignore faces smaller than this (too small to trust)
+DET_SCORE_LIVE  = 0.80   # YuNet confidence for live webcam frames (strict)
+DET_SCORE_PHOTO = 0.60   # YuNet confidence for uploaded photos / registration
 
 
 # ── Core face-analysis helpers ────────────────────────────────────────────────
@@ -70,164 +90,118 @@ def _decode(b64: str) -> np.ndarray:
     return img
 
 
-def _preprocess_gray(img: np.ndarray) -> np.ndarray:
-    """CLAHE contrast enhancement — improves detection in poor lighting."""
-    gray  = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    return clahe.apply(gray)
-
-
-def _nms(boxes: List[tuple], thresh: float = 0.35) -> List[tuple]:
-    """Non-maximum suppression — removes overlapping duplicate detections."""
-    if not boxes:
+def _yunet_detect(img: np.ndarray, score: float) -> List[np.ndarray]:
+    """
+    YuNet detection. Returns a list of face rows (np.float32, length 15:
+    x, y, w, h, then 5 landmark x/y pairs, then detection score), sorted by
+    area descending. The landmarks are what SFace uses to align the crop.
+    """
+    h, w = img.shape[:2]
+    _yunet.setInputSize((w, h))
+    _yunet.setScoreThreshold(float(score))
+    _, faces = _yunet.detect(img)
+    if faces is None:
         return []
-    rects  = np.array([[x, y, x+w, y+h] for x,y,w,h in boxes], dtype=float)
-    areas  = (rects[:,2]-rects[:,0]) * (rects[:,3]-rects[:,1])
-    order  = areas.argsort()[::-1]
-    keep: List[int] = []
-    while len(order):
-        i = order[0]; keep.append(i)
-        xx1 = np.maximum(rects[i,0], rects[order[1:],0])
-        yy1 = np.maximum(rects[i,1], rects[order[1:],1])
-        xx2 = np.minimum(rects[i,2], rects[order[1:],2])
-        yy2 = np.minimum(rects[i,3], rects[order[1:],3])
-        inter = np.maximum(0, xx2-xx1) * np.maximum(0, yy2-yy1)
-        iou   = inter / (areas[i] + areas[order[1:]] - inter + 1e-6)
-        order = order[1:][iou < thresh]
-    return [boxes[i] for i in keep]
+    rows = [f.astype(np.float32) for f in faces
+            if f[2] >= MIN_FACE_PX and f[3] >= MIN_FACE_PX]
+    rows.sort(key=lambda r: float(r[2] * r[3]), reverse=True)
+    return rows
 
 
-def _detect_faces(img: np.ndarray) -> List[tuple]:
+def _haar_rows(img: np.ndarray) -> List[np.ndarray]:
+    """Fallback detection (no DNN). Rows carry NaN landmarks so embedding aligns
+    by a plain centre-crop instead of landmark warp."""
+    gray  = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    gray  = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
+    faces = _haar.detectMultiScale(gray, 1.08, 5, minSize=(MIN_FACE_PX, MIN_FACE_PX))
+    rows: List[np.ndarray] = []
+    for (x, y, w, h) in faces:
+        row = np.full(15, np.nan, dtype=np.float32)
+        row[0:4] = (x, y, w, h)
+        rows.append(row)
+    rows.sort(key=lambda r: float(r[2] * r[3]), reverse=True)
+    return rows
+
+
+def _detect_rows(img: np.ndarray, score: float) -> List[np.ndarray]:
+    """Unified detector → list of face rows. Uses DNN when available."""
+    return _yunet_detect(img, score) if HAS_DNN else _haar_rows(img)
+
+
+def _row_bbox(row: np.ndarray) -> tuple:
+    return tuple(int(v) for v in row[0:4])
+
+
+def _embed_row(img: np.ndarray, row: np.ndarray) -> Optional[np.ndarray]:
     """
-    Live detection — CLAHE-enhanced Haar frontal cascade.
-    Strict parameters to minimise false positives on webcam frames.
+    Extract a 128-D, L2-normalised SFace identity embedding for one face row.
+    Uses landmark-based alignment when available (much more robust to pose),
+    otherwise a plain crop. Returns None if embedding cannot be produced.
     """
-    gray  = _preprocess_gray(img)
-    faces = _haar.detectMultiScale(gray, 1.08, 5, minSize=(50, 50))
-    result = [tuple(map(int, f)) for f in faces] if len(faces) > 0 else []
-    return sorted(_nms(result), key=lambda f: f[2]*f[3], reverse=True)
+    if not HAS_DNN:
+        return None
+    try:
+        if np.isnan(row[4:14]).any():
+            # No landmarks (Haar fallback) — align by plain crop to 112×112
+            x, y, w, h = _row_bbox(row)
+            crop = img[max(0, y):y + h, max(0, x):x + w]
+            if crop.size == 0:
+                return None
+            aligned = cv2.resize(crop, (112, 112))
+        else:
+            aligned = _sface.alignCrop(img, row)
+        feat = _sface.feature(aligned).flatten().astype(np.float32)
+        n = float(np.linalg.norm(feat))
+        return feat / n if n > 0 else feat
+    except Exception as e:
+        log.warning("Embedding failed: %s", e)
+        return None
 
 
-def _detect_faces_search(img: np.ndarray) -> List[tuple]:
+def _match(query: Optional[np.ndarray],
+           threshold: float = MATCH_THRESHOLD,
+           margin: float = MATCH_MARGIN):
     """
-    Search / registration detection — relaxed multi-scale ensemble with
-    frontal + profile cascades and NMS, for uploaded photos at various angles.
+    Strict 1:N identity match. Returns (db_id, name, score).
+
+    • Compares the query against every enrolled identity. Each identity may hold
+      several sample embeddings (shape (N, 128)); we take that identity's best.
+    • Accepts only when the top score >= ``threshold`` AND it leads the runner-up
+      identity by >= ``margin`` (ambiguous matches are rejected as Unknown).
+    • Legacy embeddings whose dimensionality != EMB_DIM are skipped, so old
+      enrollments simply never match (re-register them under the new model).
     """
-    gray   = _preprocess_gray(img)
-    found: List[tuple] = []
+    if query is None:
+        return None, "Unknown", 0.0
 
-    # Frontal — try 3 scales from strict to permissive
-    for scale, nbrs, msz in [(1.06, 4, (35,35)), (1.04, 3, (24,24)), (1.03, 2, (16,16))]:
-        fs = _haar.detectMultiScale(gray, scale, nbrs, minSize=msz)
-        if len(fs) > 0:
-            found.extend([tuple(map(int, f)) for f in fs])
-            break  # stop at first scale that succeeds
+    # Best score per identity (grouped by name, so multiple records / samples of
+    # the same person collapse into one and never compete against each other).
+    best_by_name: dict = {}   # name -> (score, id)
+    for e in get_all_embeddings():
+        emb = e["embedding"]
+        if emb.ndim == 1:
+            if emb.shape[0] != EMB_DIM:
+                continue
+            score = float(np.dot(query, emb))
+        else:
+            if emb.shape[-1] != EMB_DIM:
+                continue
+            score = float(np.max(emb @ query))  # best sample for this identity
+        prev = best_by_name.get(e["name"])
+        if prev is None or score > prev[0]:
+            best_by_name[e["name"]] = (score, e["id"])
 
-    # Profile face — catches slight angles
-    pf = _haar_profile.detectMultiScale(gray, 1.05, 3, minSize=(25,25))
-    if len(pf) > 0:
-        found.extend([tuple(map(int, f)) for f in pf])
+    if not best_by_name:
+        return None, "Unknown", 0.0
 
-    # Mirrored profile
-    w_img   = gray.shape[1]
-    flipped = cv2.flip(gray, 1)
-    pf2     = _haar_profile.detectMultiScale(flipped, 1.05, 3, minSize=(25,25))
-    if len(pf2) > 0:
-        found.extend([(w_img - fx - fw, fy, fw, fh) for fx,fy,fw,fh in pf2])
+    scored = sorted(((s, i, n) for n, (s, i) in best_by_name.items()),
+                    key=lambda t: t[0], reverse=True)
+    best_score, best_id, best_name = scored[0]
+    runner_up = scored[1][0] if len(scored) > 1 else 0.0
 
-    return sorted(_nms(found), key=lambda f: f[2]*f[3], reverse=True)
-
-
-def _extract_embedding(img: np.ndarray, x: int, y: int, w: int, h: int) -> np.ndarray:
-    """
-    Enhanced embedding — 4-channel feature fusion:
-      • LBP histogram (texture, illumination-invariant)
-      • HOG descriptor (shape/gradient)
-      • YCrCb colour histogram (skin-tone aware)
-      • Normalised pixel histogram (intensity)
-    All fused and L2-normalised → 416-D vector.
-    """
-    # Expand bounding box by 15% for context
-    pad = int(max(w, h) * 0.15)
-    x0  = max(0, x - pad);  y0 = max(0, y - pad)
-    x1  = min(img.shape[1], x + w + pad)
-    y1  = min(img.shape[0], y + h + pad)
-    face = img[y0:y1, x0:x1]
-    if face.size == 0:
-        face = img[max(0,y):y+h, max(0,x):x+w]
-
-    # Resize to standard size
-    face64 = cv2.resize(face, (64, 64))
-    gray64 = cv2.cvtColor(face64, cv2.COLOR_BGR2GRAY)
-
-    # ── Channel 1: LBP texture histogram (128-D) ──────────────────────────
-    def _lbp(img_gray):
-        rows, cols = img_gray.shape
-        lbp = np.zeros_like(img_gray, dtype=np.uint8)
-        for i in range(1, rows-1):
-            for j in range(1, cols-1):
-                centre = img_gray[i, j]
-                code   = 0
-                code |= (img_gray[i-1, j-1] >= centre) << 7
-                code |= (img_gray[i-1, j  ] >= centre) << 6
-                code |= (img_gray[i-1, j+1] >= centre) << 5
-                code |= (img_gray[i,   j+1] >= centre) << 4
-                code |= (img_gray[i+1, j+1] >= centre) << 3
-                code |= (img_gray[i+1, j  ] >= centre) << 2
-                code |= (img_gray[i+1, j-1] >= centre) << 1
-                code |= (img_gray[i,   j-1] >= centre) << 0
-                lbp[i, j] = code
-        return lbp
-
-    lbp_img = _lbp(gray64)
-    lbp_hist = cv2.calcHist([lbp_img], [0], None, [128], [0, 256])
-    lbp_hist = cv2.normalize(lbp_hist, lbp_hist).flatten()
-
-    # ── Channel 2: HOG gradient histogram (128-D) ─────────────────────────
-    face128 = cv2.resize(face, (128, 128))
-    gray128 = cv2.cvtColor(face128, cv2.COLOR_BGR2GRAY)
-    hog     = cv2.HOGDescriptor((128,128),(16,16),(8,8),(8,8),9)
-    hog_vec = hog.compute(gray128).flatten()
-    # Downsample HOG to 128D
-    factor  = len(hog_vec) // 128
-    if factor > 1:
-        hog_128 = hog_vec[:128*factor].reshape(128, factor).mean(axis=1)
-    else:
-        hog_128 = np.pad(hog_vec, (0, max(0, 128-len(hog_vec))))[:128]
-    hog_128 = hog_128 / (np.linalg.norm(hog_128) + 1e-7)
-
-    # ── Channel 3: YCrCb colour histogram (96-D: 32 per channel) ─────────
-    ycrcb  = cv2.cvtColor(face64, cv2.COLOR_BGR2YCrCb)
-    ycrcb_hist = np.concatenate([
-        cv2.calcHist([ycrcb], [c], None, [32], [0, 256]).flatten()
-        for c in range(3)
-    ])
-    ycrcb_hist = ycrcb_hist / (ycrcb_hist.sum() + 1e-7)
-
-    # ── Channel 4: Intensity histogram (64-D) ────────────────────────────
-    int_hist = cv2.calcHist([gray64], [0], None, [64], [0, 256]).flatten()
-    int_hist = int_hist / (int_hist.sum() + 1e-7)
-
-    # ── Fuse all channels → 416-D, L2-normalise ──────────────────────────
-    fused = np.concatenate([lbp_hist, hog_128, ycrcb_hist, int_hist]).astype(np.float32)
-    norm  = np.linalg.norm(fused)
-    return fused / (norm + 1e-7)
-
-
-def _cosine(a: np.ndarray, b: np.ndarray) -> float:
-    na, nb = np.linalg.norm(a), np.linalg.norm(b)
-    if na == 0 or nb == 0: return 0.0
-    return float(np.dot(a / na, b / nb))
-
-
-def _match(query: np.ndarray, threshold: float = 0.62):
-    enrolled = get_all_embeddings()
-    best_id, best_name, best_score = None, "Unknown", 0.0
-    for e in enrolled:
-        score = _cosine(query, e["embedding"])
-        if score > best_score and score >= threshold:
-            best_id, best_name, best_score = e["id"], e["name"], score
-    return best_id, best_name, best_score
+    if best_score >= threshold and (best_score - runner_up) >= margin:
+        return best_id, best_name, best_score
+    return None, "Unknown", best_score
 
 
 def _person_dict(p: dict) -> dict:
@@ -254,7 +228,9 @@ def _person_dict(p: dict) -> dict:
 class RegisterReq(BaseModel):
     name: str; age: int = 0; gender: str = ""; employee_id: str = ""
     department: str = ""; position: str = ""; phone: str = ""; email: str = ""
-    blood_group: str = ""; join_date: str = ""; notes: str = ""; image: str
+    blood_group: str = ""; join_date: str = ""; notes: str = ""
+    image: str = ""                       # single-frame (backward compatible)
+    images: Optional[List[str]] = None    # multi-sample enrollment (preferred)
 
 class DetectReq(BaseModel):
     image: str; log_attendance: bool = True
@@ -270,8 +246,8 @@ def health():
     return {
         "status":     "ok",
         "time":       datetime.utcnow().isoformat(),
-        "detector":   "MediaPipe" if HAS_MEDIAPIPE else "Haar Cascade",
-        "embedder":   "LBP+HOG+YCrCb 416-D fused",
+        "detector":   "YuNet (DNN)" if HAS_DNN else "Haar Cascade (fallback)",
+        "embedder":   "SFace 128-D (DNN)" if HAS_DNN else "unavailable",
     }
 
 
@@ -293,7 +269,7 @@ def api_dashboard():
         "avg_confidence":   stats.get("avg_confidence", 0),
         "by_department":    att["by_department"],
         "weekly_trend":     att["weekly_trend"],
-        "detector":         "MediaPipe" if HAS_MEDIAPIPE else "Haar",
+        "detector":         "YuNet+SFace" if HAS_DNN else "Haar",
     }
 
 
@@ -301,22 +277,42 @@ def api_dashboard():
 
 @app.post("/api/employees/register")
 def api_register(req: RegisterReq):
-    img   = _decode(req.image)
-    faces = _detect_faces(img)
-    if len(faces) == 0:
-        # Retry with relaxed detection for registration
-        faces = _detect_faces_search(img)
-    if len(faces) == 0:
-        raise HTTPException(400, "No face detected. Ensure good lighting, face centred, no obstructions.")
-    # Use the largest detected face (already sorted by area descending)
-    x, y, w, h = faces[0]
-    emb = _extract_embedding(img, x, y, w, h)
+    # Accept a burst of frames (preferred) or a single image (backward compatible).
+    images = [im for im in (req.images or []) if im] or ([req.image] if req.image else [])
+    if not images:
+        raise HTTPException(400, "No image provided.")
 
-    # Crop and store 200×200 JPEG thumbnail
+    if not HAS_DNN:
+        raise HTTPException(503, "Face recognition models not loaded on the server.")
+
+    # Build one embedding per usable frame → multi-sample identity template.
+    embeddings: List[np.ndarray] = []
+    thumb_row = None
+    thumb_img = None
+    for b64 in images:
+        img  = _decode(b64)
+        rows = _detect_rows(img, DET_SCORE_PHOTO)
+        if not rows:
+            continue
+        row = rows[0]                       # largest face in this frame
+        emb = _embed_row(img, row)
+        if emb is None:
+            continue
+        embeddings.append(emb)
+        if thumb_row is None:
+            thumb_row, thumb_img = row, img
+
+    if not embeddings:
+        raise HTTPException(400, "No face detected. Ensure good lighting, face centred, no obstructions.")
+
+    emb_arr = np.vstack(embeddings).astype(np.float32)   # (N, 128) multi-sample template
+
+    # Crop and store 200×200 JPEG thumbnail from the first good frame
+    x, y, w, h = _row_bbox(thumb_row)
     pad  = int(max(w,h)*0.15)
-    crop = img[max(0,y-pad):y+h+pad, max(0,x-pad):x+w+pad]
+    crop = thumb_img[max(0,y-pad):y+h+pad, max(0,x-pad):x+w+pad]
     if crop.size == 0:
-        crop = img[max(0,y):y+h, max(0,x):x+w]
+        crop = thumb_img[max(0,y):y+h, max(0,x):x+w]
     thumb  = cv2.resize(crop, (200, 200))
     _, buf = cv2.imencode(".jpg", thumb, [cv2.IMWRITE_JPEG_QUALITY, 82])
     photo  = "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode()
@@ -325,7 +321,7 @@ def api_register(req: RegisterReq):
         name=req.name.strip(), age=req.age, gender=req.gender,
         person_id=req.employee_id or "",
         phone=req.phone, email=req.email,
-        notes=req.notes, embedding=emb, quality_score=0.0,
+        notes=req.notes, embedding=emb_arr, quality_score=float(len(embeddings)),
     )
 
     try:
@@ -339,7 +335,8 @@ def api_register(req: RegisterReq):
     except Exception as e:
         log.warning("Extended columns update: %s", e)
 
-    return {"message": f"Employee '{req.name}' registered successfully.", "id": person_id}
+    return {"message": f"Employee '{req.name}' registered with {len(embeddings)} face sample(s).",
+            "id": person_id, "samples": len(embeddings)}
 
 
 # ── Live Detection + Attendance ───────────────────────────────────────────────
@@ -347,10 +344,11 @@ def api_register(req: RegisterReq):
 @app.post("/api/detect")
 def api_detect(req: DetectReq):
     img   = _decode(req.image)
-    faces = _detect_faces(img)
+    rows  = _detect_rows(img, DET_SCORE_LIVE)
     results = []
-    for i, (x, y, w, h) in enumerate(faces):
-        emb               = _extract_embedding(img, x, y, w, h)
+    for i, row in enumerate(rows):
+        x, y, w, h        = _row_bbox(row)
+        emb               = _embed_row(img, row)
         db_id, name, conf = _match(emb)
         employee          = None
         att_info          = {}
@@ -388,18 +386,18 @@ def api_detect(req: DetectReq):
 @app.post("/api/search")
 def api_search(req: SearchReq):
     img   = _decode(req.image)
-    faces = _detect_faces_search(img)
+    rows  = _detect_rows(img, DET_SCORE_PHOTO)
 
-    if len(faces) == 0:
+    if len(rows) == 0:
         return {
             "matches": [], "count": 0, "no_face_detected": True,
             "message": "No face could be detected. Try a clear, well-lit, front-facing photo.",
         }
 
     matches = []
-    for x, y, w, h in faces:
-        emb               = _extract_embedding(img, x, y, w, h)
-        db_id, name, conf = _match(emb, threshold=0.58)
+    for row in rows:
+        emb               = _embed_row(img, row)
+        db_id, name, conf = _match(emb)
         employee          = None; history = []; monthly_rate = 0
 
         if name != "Unknown" and db_id:

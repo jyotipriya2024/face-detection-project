@@ -20,6 +20,8 @@ type FormData = {
 const DEPARTMENTS  = ["Engineering","HR","Finance","Marketing","Security","Operations","IT","Legal","Admin","Other"];
 const POSITIONS    = ["Manager","Senior Engineer","Engineer","Analyst","Executive","Director","Intern","Supervisor","Staff","Other"];
 const BLOOD_GROUPS = ["A+","A−","B+","B−","AB+","AB−","O+","O−"];
+const SAMPLE_COUNT = 5;           // face samples captured per enrollment
+const SAMPLE_DELAY = 350;         // ms between burst frames
 
 const EMPTY: FormData = {
   name:"", age:"", gender:"", employee_id:"",
@@ -75,6 +77,9 @@ export default function RegisterPage() {
 
   const [status,   setStatus]   = useState<Status>("idle");
   const [captured, setCaptured] = useState<string | null>(null);
+  const [samples,  setSamples]  = useState<string[]>([]);
+  const [bursting, setBursting] = useState(false);
+  const [shotNo,   setShotNo]   = useState(0);
   const [message,  setMessage]  = useState("");
   const [form,     setForm]     = useState<FormData>(EMPTY);
   const [errors,   setErrors]   = useState<Errors>({});
@@ -107,18 +112,32 @@ export default function RegisterPage() {
     streamRef.current = null;
   }, []);
 
-  const capture = useCallback(() => {
-    if (!videoRef.current || !canvasRef.current) return;
-    const ctx = canvasRef.current.getContext("2d")!;
-    canvasRef.current.width  = videoRef.current.videoWidth;
-    canvasRef.current.height = videoRef.current.videoHeight;
-    ctx.drawImage(videoRef.current, 0, 0);
-    const img = canvasRef.current.toDataURL("image/jpeg", 0.92);
-    setCaptured(img);
+  // Capture a short burst of frames → multi-sample face template (more robust,
+  // and lets the backend reject look-alikes far more reliably).
+  const capture = useCallback(async () => {
+    if (!videoRef.current || !canvasRef.current || bursting) return;
+    const video  = videoRef.current;
+    const canvas = canvasRef.current;
+    const ctx    = canvas.getContext("2d")!;
+    canvas.width  = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    setBursting(true);
+    const shots: string[] = [];
+    for (let i = 0; i < SAMPLE_COUNT; i++) {
+      ctx.drawImage(video, 0, 0);
+      shots.push(canvas.toDataURL("image/jpeg", 0.92));
+      setShotNo(i + 1);
+      if (i < SAMPLE_COUNT - 1) await new Promise(r => setTimeout(r, SAMPLE_DELAY));
+    }
+    setSamples(shots);
+    setCaptured(shots[0]);
     setErrors(e => { const next = { ...e }; delete next.photo; return next; });
     stopCamera();
+    setBursting(false);
+    setShotNo(0);
     setStatus("preview");
-  }, [stopCamera]);
+  }, [stopCamera, bursting]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -134,15 +153,17 @@ export default function RegisterPage() {
 
     setStatus("submitting"); setMessage("");
     try {
+      const imageList = samples.length ? samples : (captured ? [captured] : []);
       const res  = await fetch("http://localhost:8000/api/employees/register", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, age: parseInt(form.age) || 0, image: captured }),
+        body: JSON.stringify({ ...form, age: parseInt(form.age) || 0, images: imageList }),
       });
       const data = await res.json();
       if (res.ok) {
         setStatus("success");
-        setMessage(`Employee "${form.name}" registered successfully!`);
+        setMessage(`Employee "${form.name}" registered with ${data.samples ?? imageList.length} face sample(s)!`);
         setCaptured(null);
+        setSamples([]);
         setForm(EMPTY);
         setErrors({});
         setTouched(new Set());
@@ -222,7 +243,7 @@ export default function RegisterPage() {
                       </div>
                     )}
                     {(status === "preview" || (status === "error" && !!captured)) && (
-                      <Badge variant="success" className="absolute top-2 right-2">✓ Face Captured</Badge>
+                      <Badge variant="success" className="absolute top-2 right-2">✓ {samples.length || 1} Samples Captured</Badge>
                     )}
                     {status === "capturing" && (
                       <>
@@ -243,14 +264,16 @@ export default function RegisterPage() {
                       </Button>
                     )}
                     {status === "capturing" && (
-                      <Button variant="primary" size="md" className="flex-1" type="button" onClick={capture}>
-                        <Camera size={14} /> Capture Photo
+                      <Button variant="primary" size="md" className="flex-1" type="button" onClick={capture} disabled={bursting}>
+                        {bursting
+                          ? <><Loader2 size={14} className="animate-spin" /> Capturing {shotNo}/{SAMPLE_COUNT}…</>
+                          : <><Camera size={14} /> Capture {SAMPLE_COUNT} Samples</>}
                       </Button>
                     )}
                     {(status === "preview" || (status === "error" && !!captured)) && (
                       <>
                         <Button variant="secondary" size="md" className="flex-1" type="button"
-                                onClick={() => { setCaptured(null); setErrors(v=>({...v,photo:"Face photo is required."})); startCamera(); }}>
+                                onClick={() => { setCaptured(null); setSamples([]); setErrors(v=>({...v,photo:"Face photo is required."})); startCamera(); }}>
                           <RefreshCw size={13} /> Retake
                         </Button>
                       </>

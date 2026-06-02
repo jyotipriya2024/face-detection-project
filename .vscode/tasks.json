@@ -16,29 +16,15 @@
 			"group": "build"
 		},
 		{
-			"label": "npm: dev (face_detection_system/web)",
+			"label": "backend: api_server",
 			"type": "shell",
-			"command": "npm",
+			"command": "${workspaceFolder}/.venv/Scripts/python.exe",
 			"args": [
-				"run",
-				"dev",
-				"--prefix",
-				"face_detection_system/web"
+				"api_server.py"
 			],
-			"isBackground": true,
-			"problemMatcher": [],
-			"group": "build"
-		},
-		{
-			"label": "npm: dev (face_detection_system/web)",
-			"type": "shell",
-			"command": "npm",
-			"args": [
-				"run",
-				"dev",
-				"--prefix",
-				"face_detection_system/web"
-			],
+			"options": {
+				"cwd": "${workspaceFolder}/backend"
+			},
 			"isBackground": true,
 			"problemMatcher": [],
 			"group": "build"

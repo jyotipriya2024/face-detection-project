@@ -21,8 +21,41 @@ type Detection = {
 export default function LiveDetectionPage() {
   const videoRef    = useRef<HTMLVideoElement>(null);
   const canvasRef   = useRef<HTMLCanvasElement>(null);
+  const overlayRef  = useRef<HTMLCanvasElement>(null);
   const streamRef   = useRef<MediaStream | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Frame size sent to the backend; bbox coords come back in this space.
+  const FRAME_W = 480, FRAME_H = 360;
+
+  // Draw bounding boxes + labels onto the overlay canvas (matches the video via
+  // identical object-cover sizing, so boxes sit on the faces).
+  const drawBoxes = useCallback((dets: Detection[]) => {
+    const cv = overlayRef.current;
+    if (!cv) return;
+    if (cv.width !== FRAME_W)  cv.width  = FRAME_W;
+    if (cv.height !== FRAME_H) cv.height = FRAME_H;
+    const ctx = cv.getContext("2d")!;
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    dets.forEach(d => {
+      const [x, y, w, h] = d.bbox;
+      const known = d.status === "known";
+      const color = known ? "#00e676" : "#ff4d6d";
+      // box
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = color;
+      ctx.strokeRect(x, y, w, h);
+      // label chip
+      const label = known ? `${d.name}  ${(d.confidence * 100).toFixed(0)}%` : "Unknown";
+      ctx.font = "bold 15px system-ui, sans-serif";
+      const tw = ctx.measureText(label).width;
+      const ly = y - 21 < 0 ? y + 2 : y - 21;
+      ctx.fillStyle = color;
+      ctx.fillRect(x, ly, tw + 12, 19);
+      ctx.fillStyle = "#001018";
+      ctx.fillText(label, x + 6, ly + 14);
+    });
+  }, []);
 
   const [running,    setRunning]    = useState(false);
   const [detections, setDetections] = useState<Detection[]>([]);
@@ -35,16 +68,17 @@ export default function LiveDetectionPage() {
   const sendFrame = useCallback(async () => {
     if (!videoRef.current || !canvasRef.current) return;
     const ctx = canvasRef.current.getContext("2d")!;
-    canvasRef.current.width = 320; canvasRef.current.height = 240;
-    ctx.drawImage(videoRef.current, 0, 0, 320, 240);
+    canvasRef.current.width = FRAME_W; canvasRef.current.height = FRAME_H;
+    ctx.drawImage(videoRef.current, 0, 0, FRAME_W, FRAME_H);
     try {
       const res  = await fetch("http://localhost:8000/api/detect", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: canvasRef.current.toDataURL("image/jpeg", 0.70), log_attendance: true }),
+        body: JSON.stringify({ image: canvasRef.current.toDataURL("image/jpeg", 0.85), log_attendance: true }),
       });
       if (res.ok) {
         const data = await res.json();
         setDetections(data.detections ?? []);
+        drawBoxes(data.detections ?? []);
         if (data.detections?.length > 0) setSelected(data.detections[0]);
         data.detections?.forEach((d: Detection) => {
           if (d.check_in_new && d.employee) {
@@ -57,7 +91,7 @@ export default function LiveDetectionPage() {
       }
     } catch { /* backend offline */ }
     frameCountRef.current += 1;
-  }, []);
+  }, [drawBoxes]);
 
   // FPS ticker — stable interval, reads from ref not state
   useEffect(() => {
@@ -84,7 +118,8 @@ export default function LiveDetectionPage() {
     streamRef.current?.getTracks().forEach(t => t.stop());
     streamRef.current = null;
     setRunning(false); setDetections([]); setSelected(null);
-  }, []);
+    drawBoxes([]);
+  }, [drawBoxes]);
 
   useEffect(() => () => stop(), [stop]);
 
@@ -104,6 +139,8 @@ export default function LiveDetectionPage() {
                 <div className="relative rounded-xl overflow-hidden aspect-video"
                      style={{ background: "#000" }}>
                   <video ref={videoRef} className="w-full h-full object-cover" autoPlay muted playsInline />
+                  {/* Bounding-box overlay — same object-cover sizing as the video so boxes align */}
+                  <canvas ref={overlayRef} className="absolute inset-0 w-full h-full object-cover pointer-events-none" />
                   {!running && (
                     <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-[#3a5570]">
                       <Video size={64} className="opacity-30" />

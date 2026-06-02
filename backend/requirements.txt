@@ -1,0 +1,7 @@
+# Backend Face-Recognition API — minimal runtime dependencies.
+# Install with:  pip install -r backend/requirements.txt
+opencv-contrib-python>=4.8.0   # contrib build → FaceRecognizerSF (SFace) + FaceDetectorYN (YuNet)
+numpy>=1.21.0
+fastapi>=0.110.0
+uvicorn>=0.27.0
+pydantic>=2.0.0
